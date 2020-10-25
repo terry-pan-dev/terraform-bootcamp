@@ -1,40 +1,23 @@
+# ================== Provider ====================
 provider "aws" {
   region = "ap-southeast-2"
 }
 
-variable "server_port" {
+
+# ================== Variables ====================
+variable "server_iport" {
   description = "The port the server will use for HTTP requests"
   type        = number
-  default     = 8080
+  default     = 80
 }
 
-resource "aws_security_group" "sample" {
-  name = "terraform-sample-sg"
-
-  ingress {
-    from_port   = var.server_port
-    to_port     = var.server_port
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+variable "server_oport" {
+  description = "This port will allow all outbound requests"
+  type        = number
+  default     = 0
 }
 
-resource "aws_instance" "sample" {
-  ami                    = "ami-099c1869f33464fde"
-  instance_type          = "t2.micro"
-  vpc_security_group_ids = [aws_security_group.sample.id]
-
-  user_data = <<-EOF
-  #!/bin/bash
-  echo "hello world" > index.html
-  nohup busybox httpd -f -p ${var.server_port} &
-  EOF
-
-  tags = {
-    "Name" = "terraform-sample"
-  }
-}
-
+# ================== Data Source ====================
 data "aws_vpc" "default_vpc" {
   default = true
 }
@@ -43,13 +26,138 @@ data "aws_subnet_ids" "default_vpc_subnets" {
   vpc_id = data.aws_vpc.default_vpc.id
 }
 
+# ================== Resource ====================
+resource "aws_launch_configuration" "sample" {
+  image_id        = "ami-099c1869f33464fde"
+  instance_type   = "t2.micro"
+  security_groups = [aws_security_group.elb.id]
 
-output "ec2_public_dns" {
-  description = "The public domain name for sample ec2 instance"
-  value       = aws_instance.sample.public_dns
+  user_data = <<-EOF
+  #!/bin/bash
+  echo "Hi there! from machine "$(openssl rand -base64 4) > index.html
+  nohup busybox httpd -f -p ${var.server_iport} &
+  EOF
+
+  # since aws_autoscaling_group depends on this resource. Therefore, whenever,
+  # there is any change on this resource. The normal procedure of terraform is
+  # delete this resource then create a new one. However, after adding this 
+  # lifecyle, terraform will create this resource first then update the
+  # dependented resource accordingly. After all these actions succeed, 
+  # terraform will delete the old resource.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
-output "ec2_public_ip" {
-  description = "The public ip address for sample ec2 instance"
-  value       = aws_instance.sample.public_ip
+resource "aws_autoscaling_group" "sample" {
+  launch_configuration = aws_launch_configuration.sample.name
+  # notice, vpc_zone_identifier requires a list, normally you need to add
+  # brackets in front/end of the value parts. However, since the return
+  # for data.aws_subnet_ids.default_vpc_subnets.ids is a list, we do not need
+  # to add brackets.
+  vpc_zone_identifier = data.aws_subnet_ids.default_vpc_subnets.ids
+
+  target_group_arns = [aws_lb_target_group.asg.arn]
+  health_check_type = "ELB"
+
+  min_size = 2
+  max_size = 10
+  tag {
+    key                 = "Name"
+    value               = "terraform-asg-sample"
+    propagate_at_launch = true
+  }
+}
+
+# An aws_load_balancer needs a listener(rules) to run
+# also by default aws_load_balancer does not allow any
+# incoming and out going traffic, thus we need another security group
+resource "aws_lb" "sample" {
+  name               = "terraform-asg-example"
+  load_balancer_type = "application"
+  subnets            = data.aws_subnet_ids.default_vpc_subnets.ids
+  security_groups    = [aws_security_group.elb.id]
+}
+
+# we have a listener attaches to a load_balancer. And also we need rules
+# attach to this listener
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.sample.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "404: Page not found"
+      status_code  = 404
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "asg" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 100
+
+  condition {
+    path_pattern {
+      values = ["*"]
+    }
+  }
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.asg.arn
+  }
+}
+
+
+resource "aws_security_group" "elb" {
+  name = "terraform-sample-sg"
+
+  # Allow inbound from HTTP requests
+  ingress {
+    from_port   = var.server_iport
+    to_port     = var.server_iport
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow all outbound requests
+  egress {
+    from_port   = var.server_oport
+    to_port     = var.server_oport
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# how does aws_lb_target_group knows which ec2 to send requests?
+# aws_lb_target_group needs another resource called aws_lb_target_group_attachment
+resource "aws_lb_target_group" "asg" {
+  name     = "terraform-asg-sample"
+  port     = var.server_iport
+  protocol = "HTTP"
+  vpc_id   = data.aws_vpc.default_vpc.id
+
+  health_check {
+    path     = "/"
+    protocol = "HTTP"
+    matcher  = "200"
+    # send requests every 15 seconds
+    interval = 15
+    # if no response in 3 seconds, mark it as unhealthy
+    timeout = 3
+    # 2 consecutive healthy check means the target is health
+    healthy_threshold = 2
+    # 2 consecutive unhealthy check means the target is unhealth
+    unhealthy_threshold = 2
+  }
+}
+
+
+output "alb_dns_name" {
+  value       = aws_lb.sample.dns_name
+  description = "The public domain name for load balancer"
 }
