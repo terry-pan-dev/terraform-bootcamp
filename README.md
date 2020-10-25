@@ -14,7 +14,8 @@ git tag -n9
 to checkout a tag, issuing following command
 ```bash
 # Here you have to replace TAG_NAME to an appropriate one
-git checkout tags/TAG_NAME
+# change YOUR_BRANCH_NAME to your favourate one
+git checkout tags/TAG_NAME -b YOUR_BRANCH_NAME
 ```
 
 ### Deploy the infrastructure by using terraform
