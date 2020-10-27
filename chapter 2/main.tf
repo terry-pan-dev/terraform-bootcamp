@@ -3,6 +3,19 @@ provider "aws" {
   region = "ap-southeast-2"
 }
 
+# ================== State server ====================
+
+terraform {
+  backend "s3" {
+    bucket = "terry-terraform-up-and-running-state"
+    key    = "global/s3/terraform.tfstate"
+
+    region = "ap-southeast-2"
+
+    dynamodb_table = "terry-terraform-up-and-running-locks"
+    encrypt        = true
+  }
+}
 
 # ================== Variables ====================
 variable "server_iport" {
