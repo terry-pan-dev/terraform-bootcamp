@@ -20,3 +20,16 @@ terraform plan
 terraform apply -auto-approve
 ```
 after deploied the s3 bucket, go the chapter 2 folder, deploy the code as before
+
+
+### Partial Configuration
+Having a backend to store the state of terraform is great. However, there is problem with using terraform backend.
+Terraform backend does not support variable. Therefore, you are not allowed to change the values dynamically. Which
+will cause a lot of manually copy paste work. Copy paste work generally means error prone. Current solution for this
+is to extract common part of terraform backend then put inside a separate file. For example, we can extract all parts
+of backend except the `key` variable to another file called `backend.hcl`. So when we want to deploy this terraform file
+we have to incorporate the backend.hcl file
+```bash
+# move to chapter 2
+terraform init -backend-config=backend.hcl
+```
