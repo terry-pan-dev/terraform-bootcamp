@@ -33,3 +33,23 @@ we have to incorporate the backend.hcl file
 # move to chapter 2
 terraform init -backend-config=backend.hcl
 ```
+
+### Using folder layout separation
+In a real project, we normally have multiple environments. For example, dev, stage and prod environment. How to build
+these environments without mess each other is essential for the stability of your data center. In terraform, there are
+two ways. One is using `workspace`. Which you can run command
+```bash
+terraform workspace list
+```
+to show the different workspace there. You can also create a new workspace as well
+```bash
+terraform workspace new WORKSPACE_NAME
+```
+Therefore, you can create different workspace for different envs. There is a downside by using this strategy. It's although you
+are able to change different workspaces. The code you are working on not really showing you any changes or indicator which showing
+you are modifying which environment. This downside is really a dangerous of setting up your infra. You may easy messy up your production
+environment. Hence we have another strategy which is using folder isoltion.
+
+Folder isolation means structure your folder into different environments. Whenever, you want to modify or deploy certain environment
+you have to navigate to that specific folder first to play it. Hence by using this method you will exactly know which environment
+you are currently running.
