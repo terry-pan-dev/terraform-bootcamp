@@ -7,7 +7,26 @@ provider "aws" {
 
 terraform {
   backend "s3" {
-    key = "global/s3/terraform.tfstate"
+    key = "stage/services/web-cluster/terraform.tfstate"
+  }
+}
+
+data "terraform_remote_state" "db" {
+  backend = "s3"
+  config = {
+    bucket = "terry-terraform-up-and-running-state"
+    key    = "stage/data-stores/mysql/terraform.tfstate"
+    region = "ap-southeast-2"
+  }
+}
+
+data "template_file" "user_data" {
+  template = file("user-data.sh")
+
+  vars = {
+    server_port = var.server_iport
+    db_address  = data.terraform_remote_state.db.outputs.db_address
+    db_port     = data.terraform_remote_state.db.outputs.db_port
   }
 }
 
@@ -17,11 +36,7 @@ resource "aws_launch_configuration" "sample" {
   instance_type   = "t2.micro"
   security_groups = [aws_security_group.elb.id]
 
-  user_data = <<-EOF
-  #!/bin/bash
-  echo "Hi there! from machine "$(openssl rand -base64 4) > index.html
-  nohup busybox httpd -f -p ${var.server_iport} &
-  EOF
+  user_data = data.template_file.user_data.rendered
 
   # since aws_autoscaling_group depends on this resource. Therefore, whenever,
   # there is any change on this resource. The normal procedure of terraform is
