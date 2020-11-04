@@ -53,3 +53,45 @@ environment. Hence we have another strategy which is using folder isoltion.
 Folder isolation means structure your folder into different environments. Whenever, you want to modify or deploy certain environment
 you have to navigate to that specific folder first to play it. Hence by using this method you will exactly know which environment
 you are currently running.
+```md
+├── global
+│   └── s3
+│       ├── backend.hcl
+│       ├── main.tf
+│       └── outputs.tf
+├── stage
+│   ├── data-stores
+│   │   └── mysql
+│   │       ├── main.tf
+│   │       ├── outputs.tf
+│   │       └── variables.tf
+│   └── services
+│       └── web-cluster
+│           ├── main.tf
+│           ├── outputs.tf
+│           ├── user-data.sh
+│           └── variables.tf
+```
+So, now we have structured our folder like above. We have common part which is the s3 backend. We have one environment
+which is the stage environment and for sure you can have more different environments. Even in the environment, we still
+further split the service into smaller components. For example, here if you want to launch the web-cluster, you have to
+run your data-stores first. Therefore, for playing around this session, you have to navigate to mysql folder first, run
+```bash
+terraform init -backend-config="../../../global/s3/backend.hcl"
+```
+then run
+```bash
+terraform plan
+```
+if all find you run
+```bash
+terraform apply -auto-approve
+```
+After launched the data store, you can navigate to web-cluster folder to apply pretty same commands to launch your web server
+
+
+The good thing about folder isolation is that each terraform folder contains it's own terraform state. Therefore,
+any change applies to this folder will not affect other folder, in other words, you minimize the risk of mess up
+your data center. However, the downside of this is that you have manually go to different folders to `terraform init`
+,`terraform plan` and `terraform apply`. What is more, when you want to destroy your resources. You have to go to
+each folder to manually delete them.
