@@ -7,33 +7,22 @@ provider "aws" {
 
 terraform {
   backend "s3" {
-    key = "stage/services/web-cluster/terraform.tfstate"
+    key = "modules/services/web-cluster/terraform.tfstate"
   }
 }
 
-data "terraform_remote_state" "db" {
-  backend = "s3"
-  config = {
-    bucket = "terry-terraform-up-and-running-state"
-    key    = "stage/data-stores/mysql/terraform.tfstate"
-    region = "ap-southeast-2"
-  }
-}
-
-data "template_file" "user_data" {
-  template = file("user-data.sh")
-
-  vars = {
-    server_port = var.server_iport
-    db_address  = data.terraform_remote_state.db.outputs.db_address
-    db_port     = data.terraform_remote_state.db.outputs.db_port
-  }
+locals {
+  http_port    = 80
+  any_port     = 0
+  any_protocol = "-1"
+  tcp_protocol = "tcp"
+  all_ips      = ["0.0.0.0/0"]
 }
 
 # ================== Resource ====================
 resource "aws_launch_configuration" "sample" {
   image_id        = "ami-099c1869f33464fde"
-  instance_type   = "t2.micro"
+  instance_type   = var.instance_type
   security_groups = [aws_security_group.elb.id]
 
   user_data = data.template_file.user_data.rendered
@@ -49,7 +38,7 @@ resource "aws_launch_configuration" "sample" {
   }
 }
 
-resource "aws_autoscaling_group" "sample" {
+resource "aws_autoscaling_group" "asg" {
   launch_configuration = aws_launch_configuration.sample.name
   # notice, vpc_zone_identifier requires a list, normally you need to add
   # brackets in front/end of the value parts. However, since the return
@@ -60,11 +49,11 @@ resource "aws_autoscaling_group" "sample" {
   target_group_arns = [aws_lb_target_group.asg.arn]
   health_check_type = "ELB"
 
-  min_size = 2
-  max_size = 10
+  min_size = var.min_size
+  max_size = var.max_size
   tag {
     key                 = "Name"
-    value               = "terraform-asg-sample"
+    value               = "${var.cluster_name}-asg"
     propagate_at_launch = true
   }
 }
@@ -73,7 +62,7 @@ resource "aws_autoscaling_group" "sample" {
 # also by default aws_load_balancer does not allow any
 # incoming and out going traffic, thus we need another security group
 resource "aws_lb" "sample" {
-  name               = "terraform-asg-example"
+  name               = "${var.cluster_name}-lb"
   load_balancer_type = "application"
   subnets            = data.aws_subnet_ids.default_vpc_subnets.ids
   security_groups    = [aws_security_group.elb.id]
@@ -83,7 +72,7 @@ resource "aws_lb" "sample" {
 # attach to this listener
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.sample.arn
-  port              = 80
+  port              = local.http_port
   protocol          = "HTTP"
 
   default_action {
@@ -96,7 +85,7 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-resource "aws_lb_listener_rule" "asg" {
+resource "aws_lb_listener_rule" "lb_listener_rule" {
   listener_arn = aws_lb_listener.http.arn
   priority     = 100
 
@@ -113,30 +102,30 @@ resource "aws_lb_listener_rule" "asg" {
 }
 
 
-resource "aws_security_group" "elb" {
-  name = "terraform-sample-sg"
+resource "aws_security_group" "sg" {
+  name = "${var.cluster_name}-sg"
 
   # Allow inbound from HTTP requests
   ingress {
-    from_port   = var.server_iport
-    to_port     = var.server_iport
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    from_port   = local.http_port
+    to_port     = local.http_port
+    protocol    = local.tcp_protocol
+    cidr_blocks = local.all_ips
   }
 
   # Allow all outbound requests
   egress {
-    from_port   = var.server_oport
-    to_port     = var.server_oport
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    from_port   = local.any_port
+    to_port     = local.any_port
+    protocol    = local.any_protocol
+    cidr_blocks = local.all_ips
   }
 }
 
 # how does aws_lb_target_group knows which ec2 to send requests?
 # aws_lb_target_group needs another resource called aws_lb_target_group_attachment
-resource "aws_lb_target_group" "asg" {
-  name     = "terraform-asg-sample"
+resource "aws_lb_target_group" "lb_target_group" {
+  name     = "${var.cluster_name}-lb-target-group"
   port     = var.server_iport
   protocol = "HTTP"
   vpc_id   = data.aws_vpc.default_vpc.id
